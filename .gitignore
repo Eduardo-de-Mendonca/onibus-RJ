@@ -1,0 +1,6 @@
+Temp/
+Temp_*/
+venv/
+LargeFiles/
+.vscode
+*.pyc
