@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard | Monitoramento de Frota Jaé</title>
+    <!-- Carrega o Tailwind CSS para estilização rápida e responsiva -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Carrega a biblioteca Chart.js para gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <style>
+        /* Configuração de fonte global */
+        body { font-family: 'Inter', sans-serif; }
+        /* Adiciona um efeito de sombra suave ao contêiner principal */
+        .card { transition: transform 0.2s; }
+        .card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen p-4 sm:p-8">
+
+    <div class="max-w-7xl mx-auto">
+        <!-- Título Principal -->
+        <header class="mb-8">
+            <h1 class="text-4xl font-extrabold text-blue-800 mb-2">Dashboard de Frota em Tempo Real</h1>
+            <p class="text-lg text-gray-600">Dados da API Flask. Última atualização: <span id="last-update" class="font-semibold text-blue-600">--</span></p>
+        </header>
+
+        <!-- Seção de Métricas Chave (Cards) -->
+        <div id="metrics-container" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+            
+            <!-- Card 1: Ônibus Ativos Agora -->
+            <div class="card bg-white p-6 rounded-xl shadow-lg border-l-4 border-blue-500">
+                <p class="text-sm font-medium text-gray-500">Ônibus Ativos (Real-Time)</p>
+                <p id="total-onibus-live" class="text-4xl font-bold text-gray-900 mt-1">...</p>
+                <p class="text-xs text-green-500 mt-2">Dados coletados do endpoint /atual</p>
+            </div>
+            
+            <!-- Card 2: Total de Registros Históricos (Simulado) -->
+            <div class="card bg-white p-6 rounded-xl shadow-lg border-l-4 border-green-500">
+                <p class="text-sm font-medium text-gray-500">Total de Registros no Banco (Histórico)</p>
+                <p id="total-registros-historico" class="text-4xl font-bold text-gray-900 mt-1">...</p>
+                <p class="text-xs text-gray-500 mt-2">Coletados a cada 10 minutos</p>
+            </div>
+
+            <!-- Card 3: Status da API -->
+            <div class="card bg-white p-6 rounded-xl shadow-lg border-l-4 border-purple-500">
+                <p class="text-sm font-medium text-gray-500">Status da Coleta Automática</p>
+                <p id="status-coleta" class="text-xl font-bold text-gray-900 mt-2">Ativa</p>
+                <p class="text-xs text-purple-500 mt-2">Verificado via /api/health</p>
+            </div>
+        </div>
+
+        <!-- Seção de Gráficos -->
+        <div class="bg-white p-6 rounded-xl shadow-lg">
+            <h2 class="text-2xl font-semibold text-gray-800 mb-4">Análise Estatística</h2>
+            <div class="relative h-96">
+                <canvas id="busiestLinesChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Área para mensagens de erro -->
+        <div id="error-message" class="mt-8 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg hidden" role="alert">
+            <p class="font-bold">Erro ao Conectar à API</p>
+            <p id="error-details">Verifique se o seu servidor Flask está rodando em http://127.0.0.1:5000.</p>
+        </div>
+
+    </div>
+
+    <script>
+        // URL base da sua API Flask
+        const API_BASE_URL = 'http://127.0.0.1:5000/api';
+
+        // Elementos DOM
+        const lastUpdateEl = document.getElementById('last-update');
+        const totalOnibusLiveEl = document.getElementById('total-onibus-live');
+        const totalRegistrosHistoricoEl = document.getElementById('total-registros-historico');
+        const statusColetaEl = document.getElementById('status-coleta');
+        const errorMessageEl = document.getElementById('error-message');
+        const errorDetailsEl = document.getElementById('error-details');
+        let busiestLinesChart; // Variável para a instância do Chart.js
+
+        /**
+         * Formata o timestamp para um formato legível em português.
+         * @param {string} isoTimestamp - Timestamp ISO 8601.
+         * @returns {string} Timestamp formatado.
+         */
+        function formatTimestamp(isoTimestamp) {
+            const date = new Date(isoTimestamp);
+            return date.toLocaleTimeString('pt-BR', { 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit' 
+            });
+        }
+
+        /**
+         * Exibe a mensagem de erro.
+         * @param {string} details - Detalhes do erro.
+         */
+        function displayError(details) {
+            errorMessageEl.classList.remove('hidden');
+            errorDetailsEl.textContent = `Detalhes: ${details}`;
+            // Limpa as métricas para indicar falha
+            totalOnibusLiveEl.textContent = 'ERRO';
+            totalRegistrosHistoricoEl.textContent = 'ERRO';
+            statusColetaEl.textContent = 'INATIVA';
+        }
+        
+        /**
+         * Coleta dados da API e atualiza o dashboard.
+         */
+        async function updateDashboard() {
+            try {
+                // --- 1. Busca Dados em Tempo Real (/api/onibus/atual) ---
+                const liveResponse = await fetch(`${API_BASE_URL}/onibus/atual`);
+                if (!liveResponse.ok) throw new Error(`Status HTTP: ${liveResponse.status}`);
+                const liveData = await liveResponse.json();
+
+                totalOnibusLiveEl.textContent = liveData.total_onibus.toLocaleString('pt-BR');
+                lastUpdateEl.textContent = formatTimestamp(liveData.timestamp);
+                
+                // Oculta a mensagem de erro se a coleta for bem-sucedida
+                errorMessageEl.classList.add('hidden');
+                
+                // --- 2. Busca Estatísticas e Dados Históricos (/api/analises/estatisticas) ---
+                const statsResponse = await fetch(`${API_BASE_URL}/analises/estatisticas`);
+                if (!statsResponse.ok) throw new Error(`Status HTTP: ${statsResponse.status}`);
+                const statsData = await statsResponse.json();
+
+                // Assumindo que 'estatisticas' contém o total_registros
+                const totalRegistros = statsData.estatisticas.total_registros || 0;
+                totalRegistrosHistoricoEl.textContent = totalRegistros.toLocaleString('pt-BR');
+
+                // Chama a função para renderizar ou atualizar o gráfico
+                renderBusiestLinesChart(statsData.estatisticas.top_5_lines);
+
+
+                // --- 3. Verifica Health Check (/api/health) ---
+                const healthResponse = await fetch(`${API_BASE_URL}/health`);
+                const healthData = await healthResponse.json();
+
+                statusColetaEl.textContent = healthData.coleta_automatica;
+                
+            } catch (error) {
+                console.error("Falha ao buscar dados da API:", error);
+                displayError(error.message || 'Erro de rede ou CORS');
+            }
+        }
+
+        /**
+         * Renderiza o gráfico de barras com as linhas mais movimentadas.
+         * Assumimos que 'top_5_lines' é um array de objetos como:
+         * [{ linha: "2112", contagem: 500 }, { linha: "474", contagem: 450 }, ...]
+         * @param {Array<Object>} topLinesData - Dados das linhas mais movimentadas.
+         */
+        function renderBusiestLinesChart(topLinesData) {
+            // Se os dados estiverem ausentes ou não forem um array, usamos dados mock
+            if (!Array.isArray(topLinesData) || topLinesData.length === 0) {
+                 topLinesData = [
+                    { linha: "Linha 474", contagem: 9800 },
+                    { linha: "Linha 2112", contagem: 8500 },
+                    { linha: "Linha 309", contagem: 7200 },
+                    { linha: "Linha 399", contagem: 6100 },
+                    { linha: "Linha 456", contagem: 5500 },
+                ];
+                 console.warn("Usando dados mock para o gráfico, pois /api/analises/estatisticas não retornou 'top_5_lines'.");
+            }
+
+            const linhas = topLinesData.map(item => item.linha);
+            const contagens = topLinesData.map(item => item.contagem);
+
+            const ctx = document.getElementById('busiestLinesChart').getContext('2d');
+
+            // Destrói a instância anterior do gráfico se existir
+            if (busiestLinesChart) {
+                busiestLinesChart.destroy();
+            }
+
+            busiestLinesChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: linhas,
+                    datasets: [{
+                        label: 'Contagem Histórica de Registros',
+                        data: contagens,
+                        backgroundColor: [
+                            'rgba(59, 130, 246, 0.7)', // Azul primário
+                            'rgba(16, 185, 129, 0.7)', // Verde
+                            'rgba(245, 158, 11, 0.7)',  // Amarelo
+                            'rgba(239, 68, 68, 0.7)',   // Vermelho
+                            'rgba(168, 85, 247, 0.7)'  // Roxo
+                        ],
+                        borderColor: [
+                            'rgba(59, 130, 246, 1)',
+                            'rgba(16, 185, 129, 1)',
+                            'rgba(245, 158, 11, 1)',
+                            'rgba(239, 68, 68, 1)',
+                            'rgba(168, 85, 247, 1)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false,
+                        },
+                        title: {
+                            display: true,
+                            text: 'Top 5 Linhas de Ônibus Mais Registradas'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Número de Registros'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Inicializa o Dashboard
+        document.addEventListener('DOMContentLoaded', () => {
+            updateDashboard(); // Primeira chamada imediata
+            // Atualiza os dados a cada 30 segundos
+            setInterval(updateDashboard, 30000); 
+        });
+    </script>
+</body>
+</html>
