@@ -2,11 +2,14 @@ from datetime import datetime
 import mysql.connector
 from mysql.connector import Error
 
+import os
+
 def get_connection():
-    """Cria conexão com o MySQL"""
+    db_host = os.getenv('DB_HOST', 'localhost') 
+    
     return mysql.connector.connect(
-        host='localhost',
-        user='root', 
+        host=db_host,
+        user='root',
         password='rootroot',
         database='jae_onibus'
     )
