@@ -48,6 +48,12 @@
                 <p id="status-coleta" class="text-xl font-bold text-gray-900 mt-2">Ativa</p>
                 <p class="text-xs text-purple-500 mt-2">Verificado via /api/health</p>
             </div>
+
+            <div class="card bg-white p-6 rounded-xl shadow-lg border-l-4 border-yellow-500">
+                <p class="text-sm font-medium text-gray-500">Velocidade Média Geral</p>
+                <p id="velocidade-media" class="text-4xl font-bold text-gray-900 mt-1">...</p>
+                <p class="text-xs text-gray-500 mt-2">km/h (Histórico)</p>
+            </div>
         </div>
 
         <!-- Seção de Gráficos -->
@@ -75,6 +81,7 @@
         const totalOnibusLiveEl = document.getElementById('total-onibus-live');
         const totalRegistrosHistoricoEl = document.getElementById('total-registros-historico');
         const statusColetaEl = document.getElementById('status-coleta');
+        const velocidadeMediaEl = document.getElementById('velocidade-media');
         const errorMessageEl = document.getElementById('error-message');
         const errorDetailsEl = document.getElementById('error-details');
         let busiestLinesChart; // Variável para a instância do Chart.js
@@ -104,6 +111,7 @@
             totalOnibusLiveEl.textContent = 'ERRO';
             totalRegistrosHistoricoEl.textContent = 'ERRO';
             statusColetaEl.textContent = 'INATIVA';
+            velocidadeMediaEl.textContent = 'ERRO';
         }
         
         /**
@@ -116,7 +124,6 @@
                 if (!liveResponse.ok) throw new Error(`Status HTTP: ${liveResponse.status}`);
                 const liveData = await liveResponse.json();
 
-                totalOnibusLiveEl.textContent = liveData.total_onibus.toLocaleString('pt-BR');
                 lastUpdateEl.textContent = formatTimestamp(liveData.timestamp);
                 
                 // Oculta a mensagem de erro se a coleta for bem-sucedida
@@ -124,15 +131,23 @@
                 
                 // --- 2. Busca Estatísticas e Dados Históricos (/api/analises/estatisticas) ---
                 const statsResponse = await fetch(`${API_BASE_URL}/analises/estatisticas`);
+                
                 if (!statsResponse.ok) throw new Error(`Status HTTP: ${statsResponse.status}`);
                 const statsData = await statsResponse.json();
+
+                const total_onibus = statsData.estatisticas.linhas_ativas || 0;
+                totalOnibusLiveEl.textContent = total_onibus.toLocaleString('pt-BR');
 
                 // Assumindo que 'estatisticas' contém o total_registros
                 const totalRegistros = statsData.estatisticas.total_registros || 0;
                 totalRegistrosHistoricoEl.textContent = totalRegistros.toLocaleString('pt-BR');
 
+                const velocidadeMedia = statsData.estatisticas.velocidade_media_geral || 'N/A';
+                // Adiciona ' km/h' ao valor para clareza
+                velocidadeMediaEl.textContent = `${velocidadeMedia} km/h`;
+
                 // Chama a função para renderizar ou atualizar o gráfico
-                renderBusiestLinesChart(statsData.estatisticas.top_5_lines);
+                renderBusiestLinesChart(statsData.estatisticas.linhas_mais_frequentes);
 
 
                 // --- 3. Verifica Health Check (/api/health) ---
@@ -154,24 +169,33 @@
          * @param {Array<Object>} topLinesData - Dados das linhas mais movimentadas.
          */
         function renderBusiestLinesChart(topLinesData) {
-            // Se os dados estiverem ausentes ou não forem um array, usamos dados mock
-            if (!Array.isArray(topLinesData) || topLinesData.length === 0) {
-                 topLinesData = [
-                    { linha: "Linha 474", contagem: 9800 },
-                    { linha: "Linha 2112", contagem: 8500 },
-                    { linha: "Linha 309", contagem: 7200 },
-                    { linha: "Linha 399", contagem: 6100 },
-                    { linha: "Linha 456", contagem: 5500 },
+            // 1. Prepara um array de dados para o gráfico
+            let dataForChart = [];
+    
+            // 2. Verifica se os dados reais da API são válidos (não nulos e é um array)
+            if (Array.isArray(topLinesData) && topLinesData.length > 0) {
+                // Se os dados reais existirem, usamos os 5 primeiros (Top 5)
+                dataForChart = topLinesData.slice(0, 5);
+            } else {
+                // 3. Se os dados reais estiverem ausentes, usamos dados mock (com a chave correta 'quantidade')
+                dataForChart = [
+                    // ATENÇÃO: Mudança da chave 'contagem' para 'quantidade' no mock para consistência
+                    { linha: "Linha 474", quantidade: 9800 },
+                    { linha: "Linha 2112", quantidade: 8500 },
+                    { linha: "Linha 309", quantidade: 7200 },
+                    { linha: "Linha 399", quantidade: 6100 },
+                    { linha: "Linha 456", quantidade: 5500 },
                 ];
-                 console.warn("Usando dados mock para o gráfico, pois /api/analises/estatisticas não retornou 'top_5_lines'.");
+                console.warn("Usando dados mock para o gráfico, pois a API não retornou as linhas mais frequentes.");
             }
 
-            const linhas = topLinesData.map(item => item.linha);
-            const contagens = topLinesData.map(item => item.contagem);
+            // 4. Mapeia os dados do array usando a chave CORRETA: 'quantidade'
+            const linhas = dataForChart.map(item => item.linha);
+            const contagens = dataForChart.map(item => item.quantidade); // <--- MUDANÇA ESSENCIAL AQUI!
 
             const ctx = document.getElementById('busiestLinesChart').getContext('2d');
 
-            // Destrói a instância anterior do gráfico se existir
+        // Destrói a instância anterior do gráfico se existir
             if (busiestLinesChart) {
                 busiestLinesChart.destroy();
             }
@@ -223,7 +247,7 @@
                     }
                 }
             });
-        }
+        }  
         
         // Inicializa o Dashboard
         document.addEventListener('DOMContentLoaded', () => {
