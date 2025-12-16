@@ -3,7 +3,7 @@ import mysql.connector
 from mysql.connector import Error
 
 def init_database():
-    """Cria o banco e tabela se não existirem"""
+    """Cria o banco e tabela se não existirem - VERSÃO CORRIGIDA"""
     print("=" * 50)
     print("INICIALIZANDO BANCO DE DADOS...")
     
@@ -39,17 +39,34 @@ def init_database():
         
         # 3. Remove índice único antigo se existir
         try:
-            cursor.execute("DROP INDEX IF EXISTS idx_unique_bus ON onibus")
-            print("Índice único antigo removido (se existia)")
+            cursor.execute("SHOW INDEX FROM onibus WHERE Key_name = 'idx_unique_bus'")
+            if cursor.fetchone():
+                cursor.execute("DROP INDEX idx_unique_bus ON onibus")
+                print("Índice único antigo removido")
         except:
-            pass
+            pass  # Não faz nada se não existir
         
-        # 4. Cria índices para performance (NÃO únicos)
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON onibus (timestamp)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_linha ON onibus (linha)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ordem ON onibus (ordem)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_linha_ordem ON onibus (linha, ordem)")
-        print("Índices de performance criados")
+        # 4. Cria índices para performance (CORRETO para MySQL)
+        # Nota: MySQL não suporta CREATE INDEX IF NOT EXISTS, então usamos try/except
+        
+        indices = [
+            ("idx_timestamp", "CREATE INDEX idx_timestamp ON onibus (timestamp)"),
+            ("idx_linha", "CREATE INDEX idx_linha ON onibus (linha)"),
+            ("idx_ordem", "CREATE INDEX idx_ordem ON onibus (ordem)"),
+            ("idx_linha_ordem", "CREATE INDEX idx_linha_ordem ON onibus (linha, ordem)")
+        ]
+        
+        for nome_indice, sql in indices:
+            try:
+                cursor.execute(sql)
+                print(f"Índice '{nome_indice}' criado")
+            except mysql.connector.Error as e:
+                # Se o índice já existe, apenas ignora
+                if "Duplicate key name" in str(e) or "1061" in str(e):
+                    print(f"Índice '{nome_indice}' já existe")
+                else:
+                    print(f"⚠️ Erro ao criar índice '{nome_indice}': {e}")
+                    # Continua mesmo sem o índice
         
         conn.commit()
         cursor.close()
@@ -77,55 +94,114 @@ def get_connection():
     )
 
 def save_bus_data(dados_onibus):
-    """Salva dados - SEM IGNORE, sempre insere novos registros"""
-    conn = get_connection()
-    cursor = conn.cursor()
+    """Salva dados - Otimizado com INSERT em massa"""
+    print(f"[DB] Iniciando salvamento de {len(dados_onibus):,} registros")
     
-    # Timestamp base para esta coleta
-    coleta_timestamp = datetime.now()
+    if not dados_onibus:
+        return {"success": True, "inserted": 0, "total_processed": 0}
     
+    conn = None
     try:
-        inserts_realizados = 0
+        conn = get_connection()
+        cursor = conn.cursor()
         
-        for i, onibus in enumerate(dados_onibus):
-            # Criar timestamp ÚNICO para cada ônibus
-            timestamp_unico = coleta_timestamp.replace(microsecond=i % 1000000)
+        # 1. PREPARAR DADOS EM LOTE
+        coleta_timestamp = datetime.now()
+        batch_size = 5000  # Lotes de 5.000 registros
+        total_inserts = 0
+        
+        print(f"[DB] Dividindo {len(dados_onibus):,} registros em lotes de {batch_size}...")
+        
+        # 2. PROCESSAR EM LOTES
+        for i in range(0, len(dados_onibus), batch_size):
+            batch = dados_onibus[i:i + batch_size]
+            batch_num = (i // batch_size) + 1
+            total_batches = (len(dados_onibus) - 1) // batch_size + 1
             
-            # INSERT SEM IGNORE - sempre insere
-            cursor.execute('''
-                INSERT INTO onibus 
-                (linha, ordem, velocidade, latitude, longitude, timestamp)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            ''', (
-                onibus.get('linha'),
-                onibus.get('ordem'), 
-                onibus.get('velocidade'),
-                onibus.get('lat'),
-                onibus.get('lon'),
-                timestamp_unico
-            ))
-            inserts_realizados += cursor.rowcount
+            #print(f"[DB] Processando lote {batch_num}/{total_batches} ({len(batch):,} registros)...")
+            
+            # Preparar valores para INSERT em massa
+            values = []
+            for j, onibus in enumerate(batch):
+                # Timestamp único para cada registro
+                timestamp_unico = coleta_timestamp.replace(
+                    microsecond=(i + j) % 1000000
+                )
+                
+                values.append((
+                    onibus.get('linha', '') or '',
+                    onibus.get('ordem', '') or '',
+                    float(onibus.get('velocidade', 0) or 0),
+                    float(onibus.get('lat', 0) or 0),
+                    float(onibus.get('lon', 0) or 0),
+                    timestamp_unico
+                ))
+            
+            # 3. INSERT EM MASSA (MUITO MAIS RÁPIDO)
+            try:
+                cursor.executemany('''
+                    INSERT INTO onibus 
+                    (linha, ordem, velocidade, latitude, longitude, timestamp)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                ''', values)
+                
+                inserts = cursor.rowcount
+                total_inserts += inserts
+                conn.commit()  # Commit após cada lote
+                
+                print(f"[DB] Lote {batch_num} salvo: {inserts:,} registros")
+                
+            except mysql.connector.Error as e:
+                # Se falhar no lote, tentar registro por registro
+                print(f"[DB AVISO] Erro no lote {batch_num}, tentando individualmente...")
+                conn.rollback()
+                
+                inserts_individual = 0
+                for value in values:
+                    try:
+                        cursor.execute('''
+                            INSERT INTO onibus 
+                            (linha, ordem, velocidade, latitude, longitude, timestamp)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                        ''', value)
+                        inserts_individual += 1
+                    except:
+                        continue  # Ignora erros individuais
+                
+                conn.commit()
+                total_inserts += inserts_individual
+                #print(f"[DB] Lote {batch_num} (individual): {inserts_individual:,}/{len(batch):,} salvos")
         
-        conn.commit()
-        
+        # 4. RELATÓRIO FINAL
         total_recebido = len(dados_onibus)
+        success_rate = (total_inserts / total_recebido * 100) if total_recebido > 0 else 0
         
-        print(f"COLETA SALVA:")
-        print(f"   Recebidos da API: {total_recebido} ônibus")
-        print(f"   Inseridos no BD: {inserts_realizados} registros")
+        print(f"\n{'='*50}")
+        print(f"[DB] COLETA CONCLUÍDA COM SUCESSO!")
+        print(f"{'='*50}")
+        print(f"   Total recebido: {total_recebido:,} ônibus")
+        print(f"   Total inserido: {total_inserts:,} registros")
+        print(f"   Taxa de sucesso: {success_rate:.1f}%")
+        print(f"{'='*50}")
         
         return {
             "success": True,
-            "inserted": inserts_realizados,
-            "total_processed": total_recebido
+            "inserted": total_inserts,
+            "total_processed": total_recebido,
+            "success_rate": f"{success_rate:.1f}%"
         }
         
     except Exception as e:
-        conn.rollback()
-        print(f"Erro ao salvar: {e}")
+        if conn:
+            conn.rollback()
+        print(f"[DB ERRO] Erro crítico: {e}")
+        import traceback
+        traceback.print_exc()
         return {"success": False, "error": str(e)}
     finally:
-        conn.close()
+        if conn:
+            conn.close()
+            print("[DB] Conexão MySQL fechada")
 
 def get_recent_data(limit=1000):
     """Busca dados recentes do MySQL"""
@@ -273,3 +349,22 @@ def test_connection():
         return False
     
 
+def get_invalid_lines():
+    """Identifica linhas que parecem ser inválidas"""
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    cursor.execute('''
+        SELECT DISTINCT linha, COUNT(*) as total
+        FROM onibus 
+        WHERE linha IN ('0', '000', '00000', '') 
+           OR linha IS NULL
+           OR LENGTH(linha) < 2
+        GROUP BY linha
+        ORDER BY total DESC
+    ''')
+    
+    invalid_lines = cursor.fetchall()
+    conn.close()
+    
+    return invalid_lines

@@ -83,7 +83,13 @@
 
     <script>
         // URL base da sua API Flask
-        const API_BASE_URL = 'http://127.0.0.1:5000/api';
+        const API_BASE_URL = 'http://localhost:5000/api';
+        let cacheTimestamp = null;
+        let cacheData = null;
+        const CACHE_TIME = 30000;
+        fetch(`${API_BASE_URL}/health`)
+            .then(() => console.log("Conexão com API OK"))
+            .catch(e => console.log("Erro API:", e));
 
         // Elementos DOM
         const lastUpdateEl = document.getElementById('last-update');
@@ -304,7 +310,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             updateDashboard(); // Primeira chamada imediata
             // Atualiza os dados a cada 30 segundos
-            setInterval(updateDashboard, 30000); 
+            setInterval(updateDashboard, 60000);
         });
     </script>
 </body>

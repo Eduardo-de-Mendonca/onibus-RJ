@@ -7,9 +7,31 @@ import schedule
 import time
 import threading
 
+# ========== INICIALIZAÇÃO DO BANCO ==========
+print("=" * 50)
+print("VERIFICANDO/CRIANDO BANCO DE DADOS...")
+print("=" * 50)
+
+try:
+    if database.init_database():
+        print("Banco de dados inicializado com sucesso!")
+    else:
+        print("Falha ao inicializar banco de dados")
+        print("Continuando sem banco... (alguns endpoints não funcionarão)")
+except Exception as e:
+    print(f"Erro na inicialização do banco: {e}")
+    print("Continuando...")
+
+print("=" * 50)
+
 # Inicializa a API
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins="*", supports_credentials=True)
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
 
 # ========== COLETOR AUTOMÁTICO CONTROLADO ==========
 
