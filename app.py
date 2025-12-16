@@ -14,12 +14,22 @@ CORS(app)
 # ========== COLETOR AUTOMÁTICO CONTROLADO ==========
 
 def coletor_automatico():
-    """Coleta dados automaticamente a cada 10 minutos de forma CONTROLADA"""
+    """Coleta dados automaticamente a cada 10 minutos com prevenção de sobreposição"""
     print("Coletor automático INICIADO (intervalo: 10 minutos)")
+    
+    coletando = False  # Flag para controlar execução única
     
     def coletar_e_salvar():
         """Função que coleta e salva dados uma vez"""
+        nonlocal coletando
+        
+        # Se já estiver coletando, ignora
+        if coletando:
+            print(f"Coleta já em andamento, ignorando... {datetime.now().strftime('%H:%M:%S')}")
+            return
+            
         try:
+            coletando = True
             print(f"Coletando dados automáticos... {datetime.now().strftime('%H:%M:%S')}")
             dados = collector.search_bus_data()
             if dados:
@@ -29,6 +39,8 @@ def coletor_automatico():
                 print("Coleta automática: nenhum dado retornado")
         except Exception as e:
             print(f"Erro na coleta automática: {e}")
+        finally:
+            coletando = False
     
     # CONFIGURAÇÃO SEGURA: 10 MINUTOS
     schedule.every(10).minutes.do(coletar_e_salvar)
@@ -80,7 +92,7 @@ def salvar_dados():
             if resultado["success"]:
                 return jsonify({
                     "success": True,
-                    "message": f"Inserção concluída: {resultado['inserted']} novos registros, {resultado['duplicates']} duplicatas ignoradas",
+                    "message": f"Inserção concluída: {resultado['inserted']} novos registros",
                     "timestamp": datetime.now().isoformat(),
                     "statistics": resultado
                 })
@@ -120,7 +132,7 @@ def get_historico():
 
 @app.route('/api/analises/estatisticas', methods=['GET'])
 def get_estatisticas():
-    """Retorna análises e estatísticas"""
+    """Retorna análises e estatísticas GERAIS (todos os dados)"""
     try:
         estatisticas = database.get_bus_statistics()
         
@@ -135,6 +147,25 @@ def get_estatisticas():
             "error": str(e)
         }), 500
 
+@app.route('/api/analises/estatisticas_hoje', methods=['GET'])
+def get_estatisticas_hoje():
+    """Retorna análises e estatísticas apenas dos dados de HOJE"""
+    try:
+        estatisticas_hoje = database.get_todays_statistics()
+        estatisticas_gerais = database.get_bus_statistics()  # Mantém as gerais também
+        
+        return jsonify({
+            "success": True,
+            "timestamp": datetime.now().isoformat(),
+            "estatisticas_hoje": estatisticas_hoje,
+            "estatisticas_gerais": estatisticas_gerais
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Endpoint para verificar se a API está funcionando"""
@@ -142,21 +173,41 @@ def health_check():
         "status": "online",
         "timestamp": datetime.now().isoformat(),
         "service": "API Jaé - Dados Ônibus Rio",
-        "coleta_automatica": "ativa (5 minutos)"
+        "coleta_automatica": "ativa (10 minutos)",
+        "ultima_coleta": datetime.now().strftime('%H:%M:%S')
     })
+
+@app.route('/api/analises/linhas_invalidas', methods=['GET'])
+def get_linhas_invalidas():
+    """Retorna linhas que parecem ser inválidas"""
+    try:
+        invalidas = database.get_invalid_lines()
+        
+        return jsonify({
+            "success": True,
+            "total_invalidas": len(invalidas),
+            "linhas_invalidas": invalidas
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 # ========== INICIALIZAÇÃO ==========
 
 if __name__ == '__main__':
     print("Iniciando API Jaé com Coleta Automática...")
     print("Endpoints disponíveis:")
-    print("   GET  /api/onibus/atual        - Dados em tempo real")
-    print("   POST /api/onibus/salvar       - Salva dados no banco (MANUAL)") 
-    print("   GET  /api/onibus/historico    - Dados históricos")
-    print("   GET  /api/analises/estatisticas - Estatísticas")
-    print("   GET  /api/health              - Status da API")
+    print("   GET  /api/onibus/atual               - Dados em tempo real")
+    print("   POST /api/onibus/salvar              - Salva dados no banco (MANUAL)") 
+    print("   GET  /api/onibus/historico           - Dados históricos")
+    print("   GET  /api/analises/estatisticas      - Estatísticas GERAIS")
+    print("   GET  /api/analises/estatisticas_hoje - Estatísticas de HOJE")
+    print("   GET  /api/health                     - Status da API")
     print("\nConfiguração do Coletor Automático:")
     print("   Intervalo: 10 minutos")
+    print("   Proteção: Prevenção de execuções sobrepostas")
     print("   Estimado: ~1.500 registros/coleta")
     print("   Estimado: ~9.000 registros/hora")
     print("   Use POST /api/onibus/salvar para coleta manual extra")
