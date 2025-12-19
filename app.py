@@ -235,4 +235,5 @@ if __name__ == '__main__':
     print("   Use POST /api/onibus/salvar para coleta manual extra")
     print("\n" + "="*50)
     
-    app.run(debug=False, host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=True)
+

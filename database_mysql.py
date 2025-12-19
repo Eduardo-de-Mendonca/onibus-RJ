@@ -3,26 +3,22 @@ import mysql.connector
 from mysql.connector import Error
 
 def init_database():
-    """Cria o banco e tabela se não existirem - VERSÃO CORRIGIDA"""
     print("=" * 50)
     print("INICIALIZANDO BANCO DE DADOS...")
     
     try:
-        # Primeiro conecta sem especificar o banco
         conn = mysql.connector.connect(
-            host='localhost',
+            host='db',
             user='root',
-            password='rootroot'
+            password='rootpassword'
         )
         cursor = conn.cursor()
         
-        # 1. Cria banco se não existir
         cursor.execute("CREATE DATABASE IF NOT EXISTS jae_onibus")
         print("Banco 'jae_onibus' verificado/criado")
         
         cursor.execute("USE jae_onibus")
         
-        # 2. Cria tabela
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS onibus (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -37,17 +33,13 @@ def init_database():
         ''')
         print("Tabela 'onibus' criada/verificada")
         
-        # 3. Remove índice único antigo se existir
         try:
             cursor.execute("SHOW INDEX FROM onibus WHERE Key_name = 'idx_unique_bus'")
             if cursor.fetchone():
                 cursor.execute("DROP INDEX idx_unique_bus ON onibus")
                 print("Índice único antigo removido")
         except:
-            pass  # Não faz nada se não existir
-        
-        # 4. Cria índices para performance (CORRETO para MySQL)
-        # Nota: MySQL não suporta CREATE INDEX IF NOT EXISTS, então usamos try/except
+            pass 
         
         indices = [
             ("idx_timestamp", "CREATE INDEX idx_timestamp ON onibus (timestamp)"),
@@ -61,12 +53,10 @@ def init_database():
                 cursor.execute(sql)
                 print(f"Índice '{nome_indice}' criado")
             except mysql.connector.Error as e:
-                # Se o índice já existe, apenas ignora
                 if "Duplicate key name" in str(e) or "1061" in str(e):
                     print(f"Índice '{nome_indice}' já existe")
                 else:
-                    print(f"⚠️ Erro ao criar índice '{nome_indice}': {e}")
-                    # Continua mesmo sem o índice
+                    print(f"Erro ao criar índice '{nome_indice}': {e}")
         
         conn.commit()
         cursor.close()
@@ -78,6 +68,10 @@ def init_database():
         
     except Error as e:
         print(f"ERRO ao inicializar banco: {e}")
+        return False
+        
+    except Error as e:
+        print(f"ERRO ao inicializar banco: {e}")
         print("Verifique:")
         print("  1. MySQL está rodando?")
         print("  2. Usuário/senha corretos?")
@@ -85,11 +79,10 @@ def init_database():
         return False
 
 def get_connection():
-    """Cria conexão com o MySQL"""
     return mysql.connector.connect(
-        host='localhost',
+        host='db',
         user='root', 
-        password='rootroot',
+        password='rootpassword',
         database='jae_onibus'
     )
 
@@ -231,7 +224,8 @@ def get_bus_statistics():
     linhas_ativas = cursor.fetchone()[0]
     
     cursor.execute("SELECT AVG(velocidade) FROM onibus WHERE velocidade IS NOT NULL")
-    velocidade_media = cursor.fetchone()[0] or 0
+    row = cursor.fetchone()
+    velocidade_media = float(row[0]) if row and row[0] is not None else 0.0
     
     cursor.execute('''
         SELECT linha, COUNT(*) as quantidade 
@@ -287,7 +281,8 @@ def get_todays_statistics():
         WHERE velocidade IS NOT NULL 
         AND DATE(timestamp) = CURDATE()
     """)
-    velocidade_media_hoje = cursor.fetchone()[0] or 0
+    row = cursor.fetchone()
+    velocidade_media_hoje = float(row[0]) if row and row[0] is not None else 0.0
     
     # LINHAS DISTINTAS de HOJE
     cursor.execute("""
