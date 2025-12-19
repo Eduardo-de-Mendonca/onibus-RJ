@@ -28,30 +28,45 @@
         <!-- Seção de Métricas Chave (Cards) -->
         <div id="metrics-container" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
             
-            <!-- Card 1: Ônibus Ativos Agora -->
-            <div class="card bg-white p-6 rounded-xl shadow-lg border-l-4 border-blue-500">
-                <p class="text-sm font-medium text-gray-500">Ônibus Ativos (Real-Time)</p>
-                <p id="total-onibus-live" class="text-4xl font-bold text-gray-900 mt-1">...</p>
-                <p class="text-xs text-green-500 mt-2">Dados coletados do endpoint /atual</p>
-            </div>
-            
-            <!-- Card 2: Total de Registros Históricos (Simulado) -->
+            <!-- Card 1: Registros coletados HOJE -->
             <div class="card bg-white p-6 rounded-xl shadow-lg border-l-4 border-green-500">
-                <p class="text-sm font-medium text-gray-500">Total de Registros no Banco (Histórico)</p>
-                <p id="total-registros-historico" class="text-4xl font-bold text-gray-900 mt-1">...</p>
+                <p class="text-sm font-medium text-gray-500">Registros Coletados (Hoje)</p>
+                <p id="total-registros-hoje" class="text-4xl font-bold text-gray-900 mt-1">...</p>
                 <p class="text-xs text-gray-500 mt-2">Coletados a cada 10 minutos</p>
             </div>
 
-            <!-- Card 3: Status da API -->
+            <!-- Card 2: Velocidade Média HOJE -->
+            <div class="card bg-white p-6 rounded-xl shadow-lg border-l-4 border-orange-500">
+                <p class="text-sm font-medium text-gray-500">Velocidade Média</p>
+                <p id="velocidade-media-hoje" class="text-4xl font-bold text-gray-900 mt-1">...</p>
+                <p class="text-xs text-orange-500 mt-2">Baseada nos dados coletados hoje</p>
+            </div>
+
+            <!-- Card 3: VEÍCULOS Distintos HOJE -->
+            <div class="card bg-white p-6 rounded-xl shadow-lg border-l-4 border-teal-500">
+                <p class="text-sm font-medium text-gray-500">Ônibus Ativos</p>
+                <p id="veiculos-distintos-hoje" class="text-4xl font-bold text-gray-900 mt-1">...</p>
+                <p class="text-xs text-teal-500 mt-2">Veículos diferentes registrados hoje</p>
+            </div>
+
+            <!-- Card 4: LINHAS Distintas HOJE -->
+            <div class="card bg-white p-6 rounded-xl shadow-lg border-l-4 border-pink-500">
+                <p class="text-sm font-medium text-gray-500">Linhas Ativas</p>
+                <p id="linhas-distintas-hoje" class="text-4xl font-bold text-gray-900 mt-1">...</p>
+                <p class="text-xs text-pink-500 mt-2">Linhas diferentes registradas hoje</p>
+            </div>
+
+            <!-- Card 5: Status da API -->
             <div class="card bg-white p-6 rounded-xl shadow-lg border-l-4 border-purple-500">
-                <p class="text-sm font-medium text-gray-500">Status da Coleta Automática</p>
+                <p class="text-sm font-medium text-gray-500">Status da Coleta</p>
                 <p id="status-coleta" class="text-xl font-bold text-gray-900 mt-2">Ativa</p>
-                <p class="text-xs text-purple-500 mt-2">Verificado via /api/health</p>
+                <p class="text-xs text-purple-500 mt-2">A cada 10 minutos</p>
+                <p class="text-xs text-gray-500 mt-1">Última: <span id="ultima-coleta">--:--:--</span></p>
             </div>
         </div>
 
         <!-- Seção de Gráficos -->
-        <div class="bg-white p-6 rounded-xl shadow-lg">
+        <div class="bg-white p-6 rounded-xl shadow-lg mb-8">
             <h2 class="text-2xl font-semibold text-gray-800 mb-4">Análise Estatística</h2>
             <div class="relative h-96">
                 <canvas id="busiestLinesChart"></canvas>
@@ -68,13 +83,22 @@
 
     <script>
         // URL base da sua API Flask
-        const API_BASE_URL = 'http://127.0.0.1:5000/api';
+        const API_BASE_URL = 'http://localhost:5000/api';
+        let cacheTimestamp = null;
+        let cacheData = null;
+        const CACHE_TIME = 30000;
+        fetch(`${API_BASE_URL}/health`)
+            .then(() => console.log("Conexão com API OK"))
+            .catch(e => console.log("Erro API:", e));
 
         // Elementos DOM
         const lastUpdateEl = document.getElementById('last-update');
-        const totalOnibusLiveEl = document.getElementById('total-onibus-live');
-        const totalRegistrosHistoricoEl = document.getElementById('total-registros-historico');
+        const totalRegistrosHojeEl = document.getElementById('total-registros-hoje');
+        const velocidadeMediaHojeEl = document.getElementById('velocidade-media-hoje');
+        const veiculosDistintosHojeEl = document.getElementById('veiculos-distintos-hoje');
+        const linhasDistintasHojeEl = document.getElementById('linhas-distintas-hoje');
         const statusColetaEl = document.getElementById('status-coleta');
+        const ultimaColetaEl = document.getElementById('ultima-coleta');
         const errorMessageEl = document.getElementById('error-message');
         const errorDetailsEl = document.getElementById('error-details');
         let busiestLinesChart; // Variável para a instância do Chart.js
@@ -101,9 +125,25 @@
             errorMessageEl.classList.remove('hidden');
             errorDetailsEl.textContent = `Detalhes: ${details}`;
             // Limpa as métricas para indicar falha
-            totalOnibusLiveEl.textContent = 'ERRO';
-            totalRegistrosHistoricoEl.textContent = 'ERRO';
+            totalRegistrosHojeEl.textContent = 'ERRO';
+            velocidadeMediaHojeEl.textContent = 'ERRO';
+            veiculosDistintosHojeEl.textContent = 'ERRO';
+            linhasDistintasHojeEl.textContent = 'ERRO';
             statusColetaEl.textContent = 'INATIVA';
+        }
+
+        /**
+         * Retorna dados mock para quando não há dados válidos
+         */
+        function getMockData() {
+            console.warn("Usando dados mock para o gráfico (nenhuma linha válida encontrada).");
+            return [
+                { linha: "474", quantidade: 120 },
+                { linha: "2112", quantidade: 98 },
+                { linha: "309", quantidade: 85 },
+                { linha: "399", quantidade: 72 },
+                { linha: "456", quantidade: 65 },
+            ];
         }
         
         /**
@@ -116,30 +156,49 @@
                 if (!liveResponse.ok) throw new Error(`Status HTTP: ${liveResponse.status}`);
                 const liveData = await liveResponse.json();
 
-                totalOnibusLiveEl.textContent = liveData.total_onibus.toLocaleString('pt-BR');
+                // Atualiza timestamp da última atualização
                 lastUpdateEl.textContent = formatTimestamp(liveData.timestamp);
+                ultimaColetaEl.textContent = formatTimestamp(liveData.timestamp);
                 
                 // Oculta a mensagem de erro se a coleta for bem-sucedida
                 errorMessageEl.classList.add('hidden');
                 
-                // --- 2. Busca Estatísticas e Dados Históricos (/api/analises/estatisticas) ---
-                const statsResponse = await fetch(`${API_BASE_URL}/analises/estatisticas`);
+                // --- 2. Busca Estatísticas do DIA ATUAL (/api/analises/estatisticas_hoje) ---
+                const statsResponse = await fetch(`${API_BASE_URL}/analises/estatisticas_hoje`);
                 if (!statsResponse.ok) throw new Error(`Status HTTP: ${statsResponse.status}`);
                 const statsData = await statsResponse.json();
 
-                // Assumindo que 'estatisticas' contém o total_registros
-                const totalRegistros = statsData.estatisticas.total_registros || 0;
-                totalRegistrosHistoricoEl.textContent = totalRegistros.toLocaleString('pt-BR');
-
-                // Chama a função para renderizar ou atualizar o gráfico
-                renderBusiestLinesChart(statsData.estatisticas.top_5_lines);
-
+                // CORREÇÃO: Agora usamos APENAS estatisticas_hoje para dados de HOJE
+                const estatisticasHoje = statsData.estatisticas_hoje;
+                
+                // Dados do dia atual
+                const velocidadeMediaHoje = estatisticasHoje.velocidade_media_hoje || 'N/A';
+                velocidadeMediaHojeEl.textContent = `${velocidadeMediaHoje} km/h`;
+                
+                const veiculosDistintosHoje = estatisticasHoje.veiculos_distintos_hoje || 0;
+                veiculosDistintosHojeEl.textContent = veiculosDistintosHoje.toLocaleString('pt-BR');
+                
+                const registrosHoje = estatisticasHoje.registros_hoje || 0;
+                totalRegistrosHojeEl.textContent = registrosHoje.toLocaleString('pt-BR');
+                
+                // CORREÇÃO: Agora temos linhas_distintas_hoje no endpoint
+                const linhasDistintasHoje = estatisticasHoje.linhas_distintas_hoje || 0;
+                linhasDistintasHojeEl.textContent = linhasDistintasHoje.toLocaleString('pt-BR');
+                
+                // Gráfico com dados do dia atual
+                renderBusiestLinesChart(estatisticasHoje.linhas_frequentes_hoje);
 
                 // --- 3. Verifica Health Check (/api/health) ---
-                const healthResponse = await fetch(`${API_BASE_URL}/health`);
-                const healthData = await healthResponse.json();
-
-                statusColetaEl.textContent = healthData.coleta_automatica;
+                try {
+                    const healthResponse = await fetch(`${API_BASE_URL}/health`);
+                    if (healthResponse.ok) {
+                        const healthData = await healthResponse.json();
+                        statusColetaEl.textContent = healthData.coleta_automatica || 'Ativa';
+                    }
+                } catch (healthError) {
+                    console.warn("Health check falhou, mas dashboard continua:", healthError);
+                    statusColetaEl.textContent = "Verificação pendente";
+                }
                 
             } catch (error) {
                 console.error("Falha ao buscar dados da API:", error);
@@ -148,26 +207,42 @@
         }
 
         /**
-         * Renderiza o gráfico de barras com as linhas mais movimentadas.
-         * Assumimos que 'top_5_lines' é um array de objetos como:
-         * [{ linha: "2112", contagem: 500 }, { linha: "474", contagem: 450 }, ...]
-         * @param {Array<Object>} topLinesData - Dados das linhas mais movimentadas.
+         * Renderiza o gráfico de barras com as linhas mais movimentadas HOJE.
+         * Filtra linhas inválidas como "00000", "000", "0", etc.
+         * @param {Array<Object>} topLinesData - Dados das linhas mais frequentes hoje.
          */
         function renderBusiestLinesChart(topLinesData) {
-            // Se os dados estiverem ausentes ou não forem um array, usamos dados mock
-            if (!Array.isArray(topLinesData) || topLinesData.length === 0) {
-                 topLinesData = [
-                    { linha: "Linha 474", contagem: 9800 },
-                    { linha: "Linha 2112", contagem: 8500 },
-                    { linha: "Linha 309", contagem: 7200 },
-                    { linha: "Linha 399", contagem: 6100 },
-                    { linha: "Linha 456", contagem: 5500 },
-                ];
-                 console.warn("Usando dados mock para o gráfico, pois /api/analises/estatisticas não retornou 'top_5_lines'.");
+            // 1. Prepara um array de dados para o gráfico
+            let dataForChart = [];
+    
+            // 2. Verifica se os dados reais da API são válidos (não nulos e é um array)
+            if (Array.isArray(topLinesData) && topLinesData.length > 0) {
+                // FILTRO: Remove linhas inválidas (00000, 0, vazias, etc.)
+                const validLinesData = topLinesData.filter(item => {
+                    const linha = String(item.linha || '').trim();
+                    // Remove se: vazia, só zeros, ou muito curta para ser real
+                    return linha && 
+                           linha !== '0' && 
+                           linha !== '000' && 
+                           linha !== '00000' &&
+                           linha.length >= 2; // Linhas geralmente têm 3+ dígitos
+                });
+                
+                // Se os dados filtrados existirem, usamos os 5 primeiros
+                if (validLinesData.length > 0) {
+                    dataForChart = validLinesData.slice(0, 5);
+                } else {
+                    // Se todos forem inválidos, usa mock
+                    dataForChart = getMockData();
+                }
+            } else {
+                // Se não há dados, usa mock
+                dataForChart = getMockData();
             }
 
-            const linhas = topLinesData.map(item => item.linha);
-            const contagens = topLinesData.map(item => item.contagem);
+            // 4. Mapeia os dados do array usando a chave CORRETA: 'quantidade'
+            const linhas = dataForChart.map(item => item.linha);
+            const contagens = dataForChart.map(item => item.quantidade);
 
             const ctx = document.getElementById('busiestLinesChart').getContext('2d');
 
@@ -181,7 +256,7 @@
                 data: {
                     labels: linhas,
                     datasets: [{
-                        label: 'Contagem Histórica de Registros',
+                        label: 'Registros Hoje',
                         data: contagens,
                         backgroundColor: [
                             'rgba(59, 130, 246, 0.7)', // Azul primário
@@ -209,7 +284,7 @@
                         },
                         title: {
                             display: true,
-                            text: 'Top 5 Linhas de Ônibus Mais Registradas'
+                            text: 'Top 5 Linhas de Ônibus Mais Monitoradas (Hoje)'
                         }
                     },
                     scales: {
@@ -217,19 +292,25 @@
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'Número de Registros'
+                                text: 'Número de Registros (Hoje)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Linha de Ônibus'
                             }
                         }
                     }
                 }
             });
-        }
+        }  
         
         // Inicializa o Dashboard
         document.addEventListener('DOMContentLoaded', () => {
             updateDashboard(); // Primeira chamada imediata
             // Atualiza os dados a cada 30 segundos
-            setInterval(updateDashboard, 30000); 
+            setInterval(updateDashboard, 60000);
         });
     </script>
 </body>
