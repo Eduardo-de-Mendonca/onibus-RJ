@@ -1,6 +1,7 @@
 services:
   api:
-    image: yuriaraujos/jae-api:v1
+    build: .
+    container_name: jae-api
     ports:
       - "5001:5000"
     depends_on:
@@ -8,12 +9,13 @@ services:
 
   db:
     image: mysql:8.0
+    container_name: jae-db
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: jae_user
+      MYSQL_PASSWORD: jae_password
       MYSQL_DATABASE: jae_onibus
-    ports:
-      - "3306:3306"
     volumes:
       - db_data:/var/lib/mysql
 
