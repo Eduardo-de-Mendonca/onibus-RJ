@@ -1,0 +1,23 @@
+services:
+  api:
+    build: .
+    container_name: jae-api
+    ports:
+      - "5001:5000"
+    depends_on:
+      - db
+
+  db:
+    image: mysql:8.0
+    container_name: jae-db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: jae_user
+      MYSQL_PASSWORD: jae_password
+      MYSQL_DATABASE: jae_onibus
+    volumes:
+      - db_data:/var/lib/mysql
+
+volumes:
+  db_data:
